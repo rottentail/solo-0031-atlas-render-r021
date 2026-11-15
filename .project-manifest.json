@@ -39,6 +39,11 @@
       "responsibility": "独占打开、状态校验和原子替换"
     },
     {
+      "id": "journal",
+      "path": "internal/journal",
+      "responsibility": "事件编号、保留窗口与提交边界内的事实发布"
+    },
+    {
       "id": "service",
       "path": "internal/service",
       "responsibility": "场景、素材、快照和任务业务转换"

@@ -104,5 +104,5 @@ func (a API) status(w http.ResponseWriter, r *http.Request) {
 	write(w, 200, observe.Summary(a.Service.Store.Read()))
 }
 func (a API) events(w http.ResponseWriter, r *http.Request) {
-	write(w, 200, a.Service.Store.Read().Events)
+	write(w, 200, a.Service.Store.Events())
 }

@@ -2,6 +2,7 @@ package service
 
 import (
 	"atlas-render/internal/bundle"
+	"atlas-render/internal/journal"
 	"atlas-render/internal/model"
 	"atlas-render/internal/scene"
 	"time"
@@ -22,7 +23,8 @@ func (s *Service) Import(id, name string, p bundle.Package) (model.Scene, error)
 	if e := bundle.Validate(p); e != nil {
 		return out, e
 	}
-	e := s.Store.Update(func(st *model.State) error {
+	e := s.Store.UpdateJournal(func(tx *journal.Tx) error {
+		st := tx.State()
 		if _, ok := st.Scenes[id]; ok {
 			return model.Conflict("destination scene already exists")
 		}
@@ -38,7 +40,7 @@ func (s *Service) Import(id, name string, p bundle.Package) (model.Scene, error)
 		}
 		out = model.Scene{ID: id, Name: name, Revision: 1, State: "active", Document: p.Snapshot.Document, UpdatedAt: time.Now().UTC()}
 		st.Scenes[id] = out
-		st.Emit("scene.imported", id)
+		tx.Record("scene.imported", id)
 		return nil
 	})
 	return out, e

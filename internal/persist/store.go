@@ -1,6 +1,7 @@
 package persist
 
 import (
+	"atlas-render/internal/journal"
 	"atlas-render/internal/model"
 	"encoding/json"
 	"fmt"
@@ -58,13 +59,25 @@ func (s *Store) Close() error {
 	return e
 }
 func (s *Store) Read() model.State { s.mu.RLock(); defer s.mu.RUnlock(); return model.Clone(s.state) }
-func (s *Store) Update(fn func(*model.State) error) error {
+func (s *Store) Events() []model.Event {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return journal.Events(s.state)
+}
+
+// UpdateJournal commits one domain transition. The callback mutates the
+// transaction's working state and records facts; numbering, retention and
+// event publication are finalized here, only after the callback succeeds and
+// the resulting state validates. A rejected callback or a failed durable
+// replacement leaves both the state and the journal untouched.
+func (s *Store) UpdateJournal(fn func(*journal.Tx) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	next := model.Clone(s.state)
-	if e := fn(&next); e != nil {
+	tx := journal.Begin(s.state)
+	if e := fn(tx); e != nil {
 		return e
 	}
+	next := tx.Commit()
 	if e := Validate(next); e != nil {
 		return e
 	}

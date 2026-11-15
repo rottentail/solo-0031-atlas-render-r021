@@ -2,6 +2,7 @@ package engine
 
 import (
 	"atlas-render/internal/codec"
+	"atlas-render/internal/journal"
 	"atlas-render/internal/model"
 	"atlas-render/internal/persist"
 	"atlas-render/internal/raster"
@@ -23,13 +24,14 @@ func New(st *persist.Store) *Worker {
 	return &Worker{store: st, active: map[string]context.CancelFunc{}}
 }
 func (w *Worker) Recover() error {
-	return w.store.Update(func(s *model.State) error {
+	return w.store.UpdateJournal(func(tx *journal.Tx) error {
+		s := tx.State()
 		for id, j := range s.Jobs {
 			if j.State == "running" {
 				j.State = "queued"
 				j.UpdatedAt = time.Now().UTC()
 				s.Jobs[id] = j
-				s.Emit("job.recovered", id)
+				tx.Record("job.recovered", id)
 			}
 		}
 		return nil
@@ -76,7 +78,8 @@ func (w *Worker) claim() (model.Job, bool, error) {
 		}
 		return a.CreatedAt.Before(b.CreatedAt)
 	})
-	e := w.store.Update(func(s *model.State) error {
+	e := w.store.UpdateJournal(func(tx *journal.Tx) error {
+		s := tx.State()
 		j := s.Jobs[ids[0]]
 		if j.State != "queued" {
 			return nil
@@ -84,7 +87,7 @@ func (w *Worker) claim() (model.Job, bool, error) {
 		j.State = "running"
 		j.UpdatedAt = time.Now().UTC()
 		s.Jobs[j.ID] = j
-		s.Emit("job.running", j.ID)
+		tx.Record("job.running", j.ID)
 		job = j
 		found = true
 		return nil
@@ -120,7 +123,8 @@ func (w *Worker) step(parent context.Context) error {
 	if parent.Err() != nil {
 		return nil
 	}
-	return w.store.Update(func(s *model.State) error {
+	return w.store.UpdateJournal(func(tx *journal.Tx) error {
+		s := tx.State()
 		v := s.Jobs[j.ID]
 		if v.State != "running" || v.Attempt != j.Attempt {
 			return nil
@@ -134,15 +138,15 @@ func (w *Worker) step(parent context.Context) error {
 				v.Error = e.Error()
 			}
 			s.Jobs[v.ID] = v
-			s.Emit("job."+v.State, v.ID)
+			tx.Record("job."+v.State, v.ID)
 			return nil
 		}
-		a := model.Artifact{ID: model.ID("png", s.Sequence+1), JobID: v.ID, State: "live", Digest: model.Digest(data), Width: plan.Width, Height: plan.Height, PNG: data}
+		a := model.Artifact{ID: tx.NextID("png"), JobID: v.ID, State: "live", Digest: model.Digest(data), Width: plan.Width, Height: plan.Height, PNG: data}
 		s.Artifacts[a.ID] = a
 		v.State = "succeeded"
 		v.ArtifactID = a.ID
 		s.Jobs[v.ID] = v
-		s.Emit("job.succeeded", v.ID)
+		tx.Record("job.succeeded", v.ID)
 		return nil
 	})
 }

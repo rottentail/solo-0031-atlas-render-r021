@@ -1,6 +1,7 @@
 package service
 
 import (
+	"atlas-render/internal/journal"
 	"atlas-render/internal/model"
 	"atlas-render/internal/persist"
 	"atlas-render/internal/scene"
@@ -18,7 +19,8 @@ func (s *Service) PutScene(id, name string, expected int, d model.Document) (mod
 	if e := scene.Validate(d); e != nil {
 		return out, e
 	}
-	e := s.Store.Update(func(st *model.State) error {
+	e := s.Store.UpdateJournal(func(tx *journal.Tx) error {
+		st := tx.State()
 		old, ok := st.Scenes[id]
 		if old.Revision != expected {
 			return model.Conflict("scene revision changed")
@@ -34,7 +36,7 @@ func (s *Service) PutScene(id, name string, expected int, d model.Document) (mod
 		}
 		out = model.Scene{ID: id, Name: name, Revision: old.Revision + 1, State: "active", Document: d, UpdatedAt: time.Now().UTC()}
 		st.Scenes[id] = out
-		st.Emit("scene.saved", id)
+		tx.Record("scene.saved", id)
 		return nil
 	})
 	return out, e
@@ -44,7 +46,8 @@ func (s *Service) SceneState(id string, expected int, target string) (model.Scen
 	if target != "active" && target != "archived" {
 		return out, model.Invalid("unknown scene state")
 	}
-	e := s.Store.Update(func(st *model.State) error {
+	e := s.Store.UpdateJournal(func(tx *journal.Tx) error {
+		st := tx.State()
 		v, ok := st.Scenes[id]
 		if !ok {
 			return model.Missing("scene not found")
@@ -60,7 +63,7 @@ func (s *Service) SceneState(id string, expected int, target string) (model.Scen
 		v.Revision++
 		v.UpdatedAt = time.Now().UTC()
 		st.Scenes[id] = v
-		st.Emit("scene."+target, id)
+		tx.Record("scene."+target, id)
 		out = v
 		return nil
 	})
@@ -68,7 +71,8 @@ func (s *Service) SceneState(id string, expected int, target string) (model.Scen
 }
 func (s *Service) Freeze(id string, expected int) (model.Snapshot, error) {
 	var out model.Snapshot
-	e := s.Store.Update(func(st *model.State) error {
+	e := s.Store.UpdateJournal(func(tx *journal.Tx) error {
+		st := tx.State()
 		v, ok := st.Scenes[id]
 		if !ok {
 			return model.Missing("scene not found")
@@ -84,16 +88,17 @@ func (s *Service) Freeze(id string, expected int) (model.Snapshot, error) {
 			}
 			assets[ref] = a
 		}
-		out = model.Snapshot{ID: model.ID("snap", st.Sequence+1), SceneID: id, Revision: v.Revision, State: "active", Document: v.Document, Assets: assets, CreatedAt: time.Now().UTC()}
+		out = model.Snapshot{ID: tx.NextID("snap"), SceneID: id, Revision: v.Revision, State: "active", Document: v.Document, Assets: assets, CreatedAt: time.Now().UTC()}
 		out.Digest = model.SnapshotDigest(out)
 		st.Snapshots[out.ID] = out
-		st.Emit("snapshot.frozen", out.ID)
+		tx.Record("snapshot.frozen", out.ID)
 		return nil
 	})
 	return out, e
 }
 func (s *Service) Revoke(id string) error {
-	return s.Store.Update(func(st *model.State) error {
+	return s.Store.UpdateJournal(func(tx *journal.Tx) error {
+		st := tx.State()
 		v, ok := st.Snapshots[id]
 		if !ok {
 			return model.Missing("snapshot not found")
@@ -103,7 +108,7 @@ func (s *Service) Revoke(id string) error {
 		}
 		v.State = "revoked"
 		st.Snapshots[id] = v
-		st.Emit("snapshot.revoked", id)
+		tx.Record("snapshot.revoked", id)
 		return nil
 	})
 }

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"atlas-render/internal/journal"
 	"atlas-render/internal/model"
 	"atlas-render/internal/raster"
 	"atlas-render/internal/scene"
@@ -14,7 +15,8 @@ func (s *Service) Submit(snapshotID string, scale int, key string) (model.Job, e
 		return out, model.Invalid("idempotency key required (1..80 identifier characters)")
 	}
 	fingerprint := model.CanonicalDigest([]any{snapshotID, scale})
-	e := s.Store.Update(func(st *model.State) error {
+	e := s.Store.UpdateJournal(func(tx *journal.Tx) error {
+		st := tx.State()
 		if r, ok := st.Receipts[key]; ok {
 			if r.Fingerprint != fingerprint {
 				return model.Conflict("idempotency key used for different request")
@@ -42,17 +44,18 @@ func (s *Service) Submit(snapshotID string, scale int, key string) (model.Job, e
 			return model.Busy("render queue is full")
 		}
 		now := time.Now().UTC()
-		out = model.Job{ID: model.ID("job", st.Sequence+1), SnapshotID: snapshotID, State: "queued", Scale: scale, Attempt: 1, CreatedAt: now, UpdatedAt: now, Payload: snap}
+		out = model.Job{ID: tx.NextID("job"), SnapshotID: snapshotID, State: "queued", Scale: scale, Attempt: 1, CreatedAt: now, UpdatedAt: now, Payload: snap}
 		st.Jobs[out.ID] = out
 		st.Receipts[key] = model.Receipt{Key: key, Fingerprint: fingerprint, JobID: out.ID}
-		st.Emit("job.queued", out.ID)
+		tx.Record("job.queued", out.ID)
 		return nil
 	})
 	return out, e
 }
 func (s *Service) Cancel(id string) (model.Job, error) {
 	var out model.Job
-	e := s.Store.Update(func(st *model.State) error {
+	e := s.Store.UpdateJournal(func(tx *journal.Tx) error {
+		st := tx.State()
 		j, ok := st.Jobs[id]
 		if !ok {
 			return model.Missing("job not found")
@@ -67,7 +70,7 @@ func (s *Service) Cancel(id string) (model.Job, error) {
 		j.State = "cancelled"
 		j.UpdatedAt = time.Now().UTC()
 		st.Jobs[id] = j
-		st.Emit("job.cancelled", id)
+		tx.Record("job.cancelled", id)
 		out = j
 		return nil
 	})
@@ -75,7 +78,8 @@ func (s *Service) Cancel(id string) (model.Job, error) {
 }
 func (s *Service) Retry(id string) (model.Job, error) {
 	var out model.Job
-	e := s.Store.Update(func(st *model.State) error {
+	e := s.Store.UpdateJournal(func(tx *journal.Tx) error {
+		st := tx.State()
 		j, ok := st.Jobs[id]
 		if !ok {
 			return model.Missing("job not found")
@@ -97,14 +101,15 @@ func (s *Service) Retry(id string) (model.Job, error) {
 		j.Attempt++
 		j.UpdatedAt = time.Now().UTC()
 		st.Jobs[id] = j
-		st.Emit("job.retried", id)
+		tx.Record("job.retried", id)
 		out = j
 		return nil
 	})
 	return out, e
 }
 func (s *Service) Purge(id string) error {
-	return s.Store.Update(func(st *model.State) error {
+	return s.Store.UpdateJournal(func(tx *journal.Tx) error {
+		st := tx.State()
 		a, ok := st.Artifacts[id]
 		if !ok {
 			return model.Missing("artifact not found")
@@ -115,7 +120,7 @@ func (s *Service) Purge(id string) error {
 		a.State = "purged"
 		a.PNG = nil
 		st.Artifacts[id] = a
-		st.Emit("artifact.purged", id)
+		tx.Record("artifact.purged", id)
 		return nil
 	})
 }

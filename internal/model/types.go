@@ -151,11 +151,4 @@ func Clone[T any](v T) T {
 	}
 	return out
 }
-func (s *State) Emit(kind, id string) {
-	s.Sequence++
-	s.Events = append(s.Events, Event{Sequence: s.Sequence, Kind: kind, Subject: id, At: time.Now().UTC()})
-	if len(s.Events) > 500 {
-		s.Events = s.Events[len(s.Events)-500:]
-	}
-}
 func ID(prefix string, seq int) string { return fmt.Sprintf("%s-%08d", prefix, seq) }

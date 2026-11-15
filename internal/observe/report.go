@@ -2,6 +2,7 @@ package observe
 
 import (
 	"atlas-render/internal/codec"
+	"atlas-render/internal/journal"
 	"atlas-render/internal/model"
 	"image/color"
 	"math"
@@ -62,5 +63,5 @@ func Summary(st model.State) map[string]any {
 	for _, a := range st.Artifacts {
 		bytes += len(a.PNG)
 	}
-	return map[string]any{"sceneCount": len(st.Scenes), "assetCount": len(st.Assets), "snapshotCount": len(st.Snapshots), "jobs": jobs, "artifactBytes": bytes, "sequence": st.Sequence}
+	return map[string]any{"sceneCount": len(st.Scenes), "assetCount": len(st.Assets), "snapshotCount": len(st.Snapshots), "jobs": jobs, "artifactBytes": bytes, "sequence": journal.Sequence(st)}
 }
